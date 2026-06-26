@@ -14,6 +14,7 @@ func compareStrings(t *testing.T, bOut []byte, txtExpected string) {
 func verifyNodeContent(t *testing.T, node *Node, txtExpected string) {
 	opt := DefaultOptions()
 	opt.EmitRootBraces = false
+	opt.IndentBy = "  "
 	bOut, err := MarshalWithOptions(node, opt)
 	if err != nil {
 		t.Error(err)
@@ -85,8 +86,8 @@ a: 2
 	}
 
 	compareStrings(t, bOut, `{
-  b: 1
-  a: 2
+    b: 1
+    a: 2
 }`)
 
 	bOut, err = json.Marshal(node)
@@ -179,8 +180,8 @@ func TestNode3(t *testing.T) {
 	}
 
 	compareStrings(t, bOut, `[
-  1
-  2
+    1
+    2
 ]`)
 
 	bOut, err = json.Marshal(node)
@@ -483,8 +484,8 @@ setting2: true  // yes`
 	}
 
 	compareStrings(t, output, `{
-  setting1: 3  # nada
-  setting2: true  // yes
+    setting1: 3  # nada
+    setting2: true  // yes
 }`)
 }
 

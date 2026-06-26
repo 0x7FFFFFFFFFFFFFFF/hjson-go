@@ -74,7 +74,12 @@ func run(t *testing.T, file string) {
 
 	rjson, rhjson, cm2, cm3 := getResultContent(name)
 
-	actualHjson, err := Marshal(data)
+	// The canonical result fixtures use 2-space indentation, so request that
+	// explicitly here instead of relying on the (now 4-space) default.
+	opt := DefaultOptions()
+	opt.IndentBy = "  "
+
+	actualHjson, err := MarshalWithOptions(data, opt)
 	if err != nil {
 		t.Error(err)
 		return
@@ -96,7 +101,7 @@ func run(t *testing.T, file string) {
 			t.Error(err)
 			return
 		}
-		actualCm2, err = Marshal(node)
+		actualCm2, err = MarshalWithOptions(node, opt)
 		if err != nil {
 			t.Error(err)
 			return
@@ -112,7 +117,7 @@ func run(t *testing.T, file string) {
 			t.Error(err)
 			return
 		}
-		actualCm3, err = Marshal(node)
+		actualCm3, err = MarshalWithOptions(node, opt)
 		if err != nil {
 			t.Error(err)
 			return
@@ -394,8 +399,8 @@ func (c *testSliceElemTyperB) ElemType() reflect.Type {
 
 func TestUnmarshalInterface(t *testing.T) {
 	txt := []byte(`{
-  B: first
-  A: second
+    B: first
+    A: second
 }`)
 	var objA testOrderedMapA
 	err := Unmarshal(txt, &objA)

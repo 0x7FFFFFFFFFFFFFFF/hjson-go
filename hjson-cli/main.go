@@ -41,7 +41,7 @@ func main() {
 	var showJSON = flag.Bool("j", false, "Output as formatted JSON.")
 	var showCompact = flag.Bool("c", false, "Output as JSON.")
 
-	var indentBy = flag.String("indentBy", "  ", "The indent string.")
+	var indentBy = flag.String("indentBy", "    ", "The indent string.")
 	var bracesSameLine = flag.Bool("bracesSameLine", false, "Print braces on the same line.")
 	var omitRootBraces = flag.Bool("omitRootBraces", false, "Omit braces at the root.")
 	var quoteAlways = flag.Bool("quoteAlways", false, "Always quote string values.")

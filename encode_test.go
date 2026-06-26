@@ -17,7 +17,11 @@ func marshalUnmarshalExpected(
 	src,
 	dst interface{},
 ) {
-	buf, err := Marshal(src)
+	// These tests embed expectations using 2-space indentation, so request that
+	// explicitly instead of relying on the (now 4-space) default.
+	opt := DefaultOptions()
+	opt.IndentBy = "  "
+	buf, err := MarshalWithOptions(src, opt)
 	if err != nil {
 		t.Error(err)
 	}
@@ -60,6 +64,22 @@ func TestEncodeEmptyStruct(t *testing.T) {
 	}
 	if string(buf) != "{}" {
 		t.Error("Empty struct encoding error")
+	}
+}
+
+func TestDefaultIndentIsFourSpaces(t *testing.T) {
+	if got := DefaultOptions().IndentBy; got != "    " {
+		t.Errorf("Expected default IndentBy to be 4 spaces, got %q", got)
+	}
+
+	// Marshalling with default options should indent each level with 4 spaces.
+	buf, err := Marshal(map[string]int{"a": 1})
+	if err != nil {
+		t.Error(err)
+	}
+	expected := "{\n    a: 1\n}"
+	if string(buf) != expected {
+		t.Errorf("Expected:\n%s\nGot:\n%s\n", expected, string(buf))
 	}
 }
 
@@ -401,14 +421,14 @@ type TestMarshalAlias TestMarshalStruct
 func TestEncodeMarshalJSON(t *testing.T) {
 	input := TestMarshalStruct{}
 	expected1 := `{
-  arr: [
-    foo
-    bar
-  ]
-  map: {
-    key1: 1
-    key2: B
-  }
+    arr: [
+        foo
+        bar
+    ]
+    map: {
+        key1: 1
+        key2: B
+    }
 }`
 	buf, err := Marshal(input)
 	if err != nil {
@@ -460,22 +480,22 @@ func TestEncodeMarshalJSON(t *testing.T) {
 		t.Error(err)
 	}
 	expected2 := `{
-  A: FirstField
-  B: {
-    arr: [
-      foo
-      bar
-    ]
-    map: {
-      key1: 1
-      key2: B
+    A: FirstField
+    B: {
+        arr: [
+            foo
+            bar
+        ]
+        map: {
+            key1: 1
+            key2: B
+        }
     }
-  }
-  C: {
-    D: struct field
+    C: {
+        D: struct field
+        Zero: 0
+    }
     Zero: 0
-  }
-  Zero: 0
 }`
 	if string(buf) != expected2 {
 		t.Errorf("Expected:\n%s\nGot:\n%s\n\n", expected2, string(buf))
@@ -577,7 +597,7 @@ func TestEncodeSliceOfPtrOfPtrOfString(t *testing.T) {
 		return
 	}
 	if !reflect.DeepEqual(buf, []byte(`[
-  "1"
+    "1"
 ]`)) {
 		t.Error("Marshaler interface error")
 	}
@@ -618,7 +638,7 @@ func TestBaseIndentation(t *testing.T) {
 		Foo: "Bar",
 	}
 	facit := []byte(`   {
-     Foo: Bar
+       Foo: Bar
    }`)
 	opt := DefaultOptions()
 	opt.BaseIndentation = "   "
@@ -638,9 +658,9 @@ func TestQuoteAmbiguousStrings(t *testing.T) {
 		"False": "false",
 	}
 	facit := []byte(`{
-  False: false
-  Null: null
-  One: 1
+    False: false
+    Null: null
+    One: 1
 }`)
 	opt := DefaultOptions()
 	opt.QuoteAlways = false
@@ -794,7 +814,7 @@ func TestMarshalMapIntKey(t *testing.T) {
 		t.Error(err)
 	}
 	expected := `{
-  3: true
+    3: true
 }`
 	if string(buf) != expected {
 		t.Errorf("Expected:\n%s\n\nGot:\n%s\n", expected, string(buf))
@@ -845,15 +865,15 @@ func TestStructComment(t *testing.T) {
 		t.Error(err)
 	}
 	expected := `{
-  # First comment
-  x: hi!
+    # First comment
+    x: hi!
 
-  # Second comment
-  # Look ma, new lines
-  B: 3
+    # Second comment
+    # Look ma, new lines
+    B: 3
 
-  C: some text
-  D: 5
+    C: some text
+    D: 5
 }`
 	if string(h) != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s\n\n", expected, string(h))
@@ -866,10 +886,10 @@ func TestStructComment(t *testing.T) {
 		t.Error(err)
 	}
 	expected = `{
-  x: hi!
-  B: 3
-  C: some text
-  D: 5
+    x: hi!
+    B: 3
+    C: some text
+    D: 5
 }`
 	if string(h) != expected {
 		t.Errorf("Expected:\n%s\nGot:\n%s\n\n", expected, string(h))

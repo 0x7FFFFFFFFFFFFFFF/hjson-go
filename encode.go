@@ -42,7 +42,7 @@ type EncoderOptions struct {
 // EmitRootBraces = true
 // QuoteAlways = false
 // QuoteAmbiguousStrings = true
-// IndentBy = "  "
+// IndentBy = "    "
 // BaseIndentation = ""
 // Comments = true
 func DefaultOptions() EncoderOptions {
@@ -52,7 +52,7 @@ func DefaultOptions() EncoderOptions {
 		EmitRootBraces:        true,
 		QuoteAlways:           false,
 		QuoteAmbiguousStrings: true,
-		IndentBy:              "  ",
+		IndentBy:              "    ",
 		BaseIndentation:       "",
 		Comments:              true,
 	}
