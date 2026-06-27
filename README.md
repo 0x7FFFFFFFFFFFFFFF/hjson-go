@@ -48,18 +48,16 @@ go install github.com/hjson/hjson-go/v4/hjson-cli@latest
 # Usage as command line tool
 ```
 usage: hjson-cli [OPTIONS] [INPUT]
-hjson can be used to convert JSON from/to Hjson.
+hjson reads and formats Hjson.
 
-hjson will read the given JSON/Hjson input file or read from stdin.
+hjson will read the given Hjson input file or read from stdin.
 
 Options:
   -bracesSameLine
       Print braces on the same line.
-  -c  Output as JSON.
   -h  Show this screen.
   -indentBy string
       The indent string. (default "  ")
-  -j  Output as formatted JSON.
   -omitRootBraces
       Omit braces at the root.
   -preserveKeyOrder
@@ -71,8 +69,8 @@ Options:
 ```
 
 Sample:
-- run `hjson-cli test.json > test.hjson` to convert to Hjson
-- run `hjson-cli -j test.hjson > test.json` to convert to JSON
+- run `hjson-cli test.hjson` to print formatted Hjson to stdout
+- run `hjson-cli test.hjson > out.hjson` to write formatted Hjson to a file
 
 # Usage as a GO library
 

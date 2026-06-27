@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -17,30 +15,19 @@ import (
 // go build -ldflags "-X main.Version=v3.0"
 var Version string
 
-func fixJSON(data []byte) []byte {
-	data = bytes.Replace(data, []byte("\\u003c"), []byte("<"), -1)
-	data = bytes.Replace(data, []byte("\\u003e"), []byte(">"), -1)
-	data = bytes.Replace(data, []byte("\\u0026"), []byte("&"), -1)
-	data = bytes.Replace(data, []byte("\\u0008"), []byte("\\b"), -1)
-	data = bytes.Replace(data, []byte("\\u000c"), []byte("\\f"), -1)
-	return data
-}
-
 func main() {
 
 	flag.Usage = func() {
 		fmt.Println("usage: hjson-cli [OPTIONS] [INPUT]")
-		fmt.Println("hjson can be used to convert JSON from/to Hjson.")
+		fmt.Println("hjson reads and formats Hjson.")
 		fmt.Println("")
-		fmt.Println("hjson will read the given JSON/Hjson input file or read from stdin.")
+		fmt.Println("hjson will read the given Hjson input file or read from stdin.")
 		fmt.Println("")
 		fmt.Println("Options:")
 		flag.PrintDefaults()
 	}
 
 	var help = flag.Bool("h", false, "Show this screen.")
-	var showJSON = flag.Bool("j", false, "Output as formatted JSON.")
-	var showCompact = flag.Bool("c", false, "Output as JSON.")
 
 	var indentBy = flag.String("indentBy", "    ", "The indent string.")
 	var bracesSameLine = flag.Bool("bracesSameLine", false, "Print braces on the same line.")
@@ -86,27 +73,15 @@ func main() {
 			return nil, err
 		}
 
-		var out []byte
-		if *showCompact {
-			if out, err = json.Marshal(value); err != nil {
-				return nil, err
-			}
-			out = fixJSON(out)
-		} else if *showJSON {
-			if out, err = json.MarshalIndent(value, "", *indentBy); err != nil {
-				return nil, err
-			}
-			out = fixJSON(out)
-		} else {
-			opt := hjson.DefaultOptions()
-			opt.IndentBy = *indentBy
-			opt.BracesSameLine = *bracesSameLine
-			opt.EmitRootBraces = !*omitRootBraces
-			opt.QuoteAlways = *quoteAlways
-			opt.Comments = *preserveComments
-			if out, err = hjson.MarshalWithOptions(value, opt); err != nil {
-				return nil, err
-			}
+		opt := hjson.DefaultOptions()
+		opt.IndentBy = *indentBy
+		opt.BracesSameLine = *bracesSameLine
+		opt.EmitRootBraces = !*omitRootBraces
+		opt.QuoteAlways = *quoteAlways
+		opt.Comments = *preserveComments
+		out, err := hjson.MarshalWithOptions(value, opt)
+		if err != nil {
+			return nil, err
 		}
 		return out, nil
 	}
