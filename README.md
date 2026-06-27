@@ -1,12 +1,9 @@
 # hjson-go
 
-[![Build Status](https://github.com/hjson/hjson-go/workflows/test/badge.svg)](https://github.com/hjson/hjson-go/actions)
-[![Go Pkg](https://img.shields.io/github/release/hjson/hjson-go.svg?style=flat-square&label=go-pkg)](https://github.com/hjson/hjson-go/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hjson/hjson-go?style=flat-square)](https://goreportcard.com/report/github.com/hjson/hjson-go)
-[![coverage](https://img.shields.io/badge/coverage-ok-brightgreen.svg?style=flat-square)](https://gocover.io/github.com/hjson/hjson-go/)
-[![godoc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/hjson/hjson-go/v4)
-
-![Hjson Intro](https://hjson.github.io/hjson1.gif)
+A fork of the Go [Hjson](https://github.com/hjson/hjson-js) library — a
+human-friendly configuration format with comments and optional quotes/commas.
+The points below describe how this fork differs from upstream; the rest of this
+document covers general usage.
 
 ```
 {
@@ -27,24 +24,21 @@
 }
 ```
 
-The Go implementation of Hjson is based on [hjson-js](https://github.com/hjson/hjson-js). For other platforms see [hjson.github.io](https://hjson.github.io).
+## Changes in this internal fork
 
-More documentation can be found at https://pkg.go.dev/github.com/hjson/hjson-go/v4
+* **`Unmarshal` now returns an ordered map.** The signature is
+  `Unmarshal(data []byte) (*hjson.OrderedMap, error)`. To decode into a struct,
+  a `map`, an `interface{}` or an `*hjson.Node`, use `UnmarshalWithOptions`; the
+  previous two-argument `Unmarshal(data, &v)` form is no longer exported. See
+  [API](#api).
+* **Quoteless array syntax.** A quoteless value containing `,,` becomes an array,
+  and `||` adds an outer level (an array of arrays). See
+  [Quoteless arrays](#quoteless-arrays).
+* **Four-space indentation by default.** `DefaultOptions().IndentBy` and the
+  `hjson-cli -indentBy` flag both default to four spaces (`"    "`).
+* **Keys without values are allowed by default.** See
+  [Keys without values](#keys-without-values).
 
-# Install
-
-Instructions for installing a pre-built **hjson-cli** tool can be found at https://hjson.github.io/users-bin.html
-
-If you instead want to build locally, make sure you have a working Go environment. See the [install instructions](https://golang.org/doc/install.html).
-
-- In order to use Hjson from your own Go source code, just add an import line like the one here below. Before building your project, run `go mod tidy` in order to download the Hjson source files. The suffix `/v4` is required in the import path, unless you specifically want to use an older major version.
-```go
-import "github.com/hjson/hjson-go/v4"
-```
-- If you instead want to use the **hjson-cli** command line tool, run the command here below in your terminal. The executable will be installed into your `go/bin` folder, make sure that folder is included in your `PATH` environment variable.
-```bash
-go install github.com/hjson/hjson-go/v4/hjson-cli@latest
-```
 # Usage as command line tool
 ```
 usage: hjson-cli [OPTIONS] [INPUT]
@@ -53,13 +47,19 @@ hjson reads and formats Hjson.
 hjson will read the given Hjson input file or read from stdin.
 
 Options:
+  -allowKeysWithoutValues
+      Allow object keys that have no value, recorded with a null value
+      (enabled by default; use -allowKeysWithoutValues=false to disable).
+      (default true)
   -bracesSameLine
       Print braces on the same line.
   -h  Show this screen.
   -indentBy string
-      The indent string. (default "  ")
+      The indent string. (default "    ")
   -omitRootBraces
       Omit braces at the root.
+  -preserveComments
+      Preserve comments in Hjson output (and key order in any output).
   -preserveKeyOrder
       Preserve key order in objects/maps.
   -quoteAlways
@@ -101,13 +101,13 @@ func main() {
     // can put the decoded data.
     var dat map[string]interface{}
 
-    // Decode with default options and check for errors.
-    if err := hjson.Unmarshal(sampleText, &dat); err != nil {
+    // Decode with the default decoder options and check for errors. Unmarshal
+    // now returns an *hjson.OrderedMap, so to decode into a map we use
+    // UnmarshalWithOptions.
+    options := hjson.DefaultDecoderOptions()
+    if err := hjson.UnmarshalWithOptions(sampleText, &dat, options); err != nil {
         panic(err)
     }
-    // short for:
-    // options := hjson.DefaultDecoderOptions()
-    // err := hjson.UnmarshalWithOptions(sampleText, &dat, options)
     fmt.Println(dat)
 
     // In order to use the values in the decoded map,
@@ -129,6 +129,56 @@ func main() {
     // hjson, _ := hjson.MarshalWithOptions(sampleMap, options)
     fmt.Println(string(hjson))
 }
+```
+
+## Quoteless arrays
+
+A quoteless string value is normally read verbatim. This fork adds two
+separators, applied with regular expressions, that turn such a value into an
+array.
+
+**Double comma (`,,`) — a flat array.** A quoteless value that contains two
+consecutive commas is split into an array of strings:
+
+```
+text: ab,, cd ef ,, haha
+# -> text = ["ab", "cd ef", "haha"]
+```
+
+Elements are always strings (even when they look like numbers), surrounding
+whitespace is trimmed, and empty elements are dropped (so a trailing `,,` adds
+nothing). A single comma is not a separator: `a, b, c` stays the string
+`"a, b, c"`.
+
+**Double pipe (`||`) — a nested array.** If a quoteless value also contains
+`||`, it is split on `||` first (the outer array) and each element is then split
+on `,,` (the inner array), producing an array of arrays:
+
+```
+text: ab,, cd ef || gh,, ij
+# -> text = [["ab", "cd ef"], ["gh", "ij"]]
+```
+
+The split order is always `||` first, then `,,`, and empty elements are dropped
+at both levels. A value containing `||` always produces an array of arrays —
+every outer element becomes a sub-array, even a single-element one
+(`a || b` -> `[["a"], ["b"]]`).
+
+Both forms may span several lines: reading continues onto the next line until it
+looks like a new key or the enclosing object/array ends, and line breaks act as
+inner (`,,`-level) separators. For example, these two documents are equivalent:
+
+```
+DB1:
+{
+  pub1: TB1,, TB2
+  pub2: TB3
+}
+```
+
+```
+DB1: TB1,, TB2 || TB3
+# -> DB1 = [["TB1", "TB2"], ["TB3"]]
 ```
 
 ## Unmarshal to Go structs
@@ -168,14 +218,14 @@ func main() {
 
     // unmarshal
     var sample Sample
-    hjson.Unmarshal(sampleText, &sample)
+    hjson.UnmarshalWithOptions(sampleText, &sample, hjson.DefaultDecoderOptions())
 
     fmt.Println(sample.Rate)
     fmt.Println(sample.Array)
 
     // unmarshal using json tags on struct fields
     var sampleAlias SampleAlias
-    hjson.Unmarshal(sampleText, &sampleAlias)
+    hjson.UnmarshalWithOptions(sampleText, &sampleAlias, hjson.DefaultDecoderOptions())
 
     fmt.Println(sampleAlias.Rett)
     fmt.Println(sampleAlias.Ashtray)
@@ -217,21 +267,21 @@ Output:
 
 ```
 {
-  # First comment
-  x: hi!
+    # First comment
+    x: hi!
 
-  # Second comment
-  # Look ma, new lines
-  B: 3
+    # Second comment
+    # Look ma, new lines
+    B: 3
 
-  C: some text
-  D: 5
+    C: some text
+    D: 5
 }
 ```
 
 ## Read and write comments
 
-The only way to read comments from Hjson input is to use a destination variable of type *hjson.Node* or *&ast;hjson.Node*. The *hjson.Node* must be the root destination, it won't work if you create a field of type *hjson.Node* in some other struct and use that struct as destination. An *hjson.Node* struct is simply a wrapper for a value and comments stored in an *hjson.Comments* struct. It also has several convenience functions, for example *AtIndex()* or *SetKey()* that can be used when you know that the node contains a value of type `[]interface{}` or *&ast;hjson.OrderedMap*. All of the elements in `[]interface{}` or *&ast;hjson.OrderedMap* will be of type *&ast;hjson.Node* in trees created by *hjson.Unmarshal*, but the *hjson.Node* convenience functions unpack the actual values from them.
+The only way to read comments from Hjson input is to use a destination variable of type *hjson.Node* or *&ast;hjson.Node*. The *hjson.Node* must be the root destination, it won't work if you create a field of type *hjson.Node* in some other struct and use that struct as destination. An *hjson.Node* struct is simply a wrapper for a value and comments stored in an *hjson.Comments* struct. It also has several convenience functions, for example *AtIndex()* or *SetKey()* that can be used when you know that the node contains a value of type `[]interface{}` or *&ast;hjson.OrderedMap*. All of the elements in `[]interface{}` or *&ast;hjson.OrderedMap* will be of type *&ast;hjson.Node* in trees created when unmarshalling into an *hjson.Node*, but the *hjson.Node* convenience functions unpack the actual values from them.
 
 When *hjson.Node* or *&ast;hjson.Node* is used as destination for Hjson unmarshal the output will be a tree of *&ast;hjson.Node* where all of the values contained in tree nodes will be of these types:
 
@@ -271,7 +321,7 @@ func main() {
     }`)
 
     var node hjson.Node
-    if err := hjson.Unmarshal(sampleText, &node); err != nil {
+    if err := hjson.UnmarshalWithOptions(sampleText, &node, hjson.DefaultDecoderOptions()); err != nil {
         panic(err)
     }
 
@@ -304,9 +354,9 @@ Output:
             foo
             bar
         ]
-  subMap: {
-    subVal: 1
-  }
+    subMap: {
+        subVal: 1
+    }
     }
 ```
 
@@ -325,11 +375,11 @@ quoteless string — are still treated as the value of the key.
 
 ```go
 var dat map[string]interface{}
-hjson.Unmarshal([]byte(`
+hjson.UnmarshalWithOptions([]byte(`
 cdc-gen:
 db-name: *
 table-name: *
-`), &dat)
+`), &dat, hjson.DefaultDecoderOptions())
 // dat == map[string]interface{}{"cdc-gen": nil, "db-name": "*", "table-name": "*"}
 ```
 
@@ -360,7 +410,7 @@ type foo struct {
 
 func main() {
     var dest foo
-    err := hjson.Unmarshal([]byte(`a: 3`), &dest)
+    err := hjson.UnmarshalWithOptions([]byte(`a: 3`), &dest, hjson.DefaultDecoderOptions())
     if err != nil {
         fmt.Println(err)
     }
@@ -379,7 +429,7 @@ String pointer destinations can be set to `nil` by writing `null` in an Hjson fi
 
 ## ElemTyper interface
 
-If a destination type implements hjson.ElemTyper, Unmarshal() will call ElemType() on the destination when unmarshalling an array or an object, to see if any array element or leaf node should be of type string even if it can be treated as a number, boolean or null. This is most useful if the destination also implements the json.Unmarshaler interface, because then there is no other way for Unmarshal() to know the type of the elements on the destination. If a destination implements ElemTyper all of its elements must be of the same type.
+If a destination type implements hjson.ElemTyper, UnmarshalWithOptions() will call ElemType() on the destination when unmarshalling an array or an object, to see if any array element or leaf node should be of type string even if it can be treated as a number, boolean or null. This is most useful if the destination also implements the json.Unmarshaler interface, because then there is no other way for UnmarshalWithOptions() to know the type of the elements on the destination. If a destination implements ElemTyper all of its elements must be of the same type.
 
 Example implementation for a generic ordered map:
 
@@ -394,10 +444,27 @@ func (o *OrderedMap[T]) ElemType() reflect.Type {
 
 In order to avoid stack overflow all unmarshal-functions return an error if the Hjson input contains a tree more than 10000 levels deep. This is the same limit as in the Go standard library package `encoding/json`.
 
-# API
+## API
 
-[![godoc](https://godoc.org/github.com/hjson/hjson-go/v4?status.svg)](https://godoc.org/github.com/hjson/hjson-go/v4)
+Decoding entry points:
 
-# History
+```go
+// Unmarshal parses Hjson and returns an ordered tree. Nested objects are
+// *hjson.OrderedMap, arrays are []interface{}, and leaves are string, float64
+// (or json.Number), bool or nil. The root of the document must be an object.
+func Unmarshal(data []byte) (*hjson.OrderedMap, error)
 
-[see releases](https://github.com/hjson/hjson-go/releases)
+// UnmarshalWithOptions decodes into v, which may be a pointer to a struct, map,
+// interface{}, hjson.Node or hjson.OrderedMap. Use this (usually with
+// hjson.DefaultDecoderOptions()) whenever you need a typed destination, or an
+// *hjson.Node to also read comments.
+func UnmarshalWithOptions(data []byte, v interface{}, options DecoderOptions) error
+```
+
+The previous two-argument `Unmarshal(data []byte, v interface{}) error` has been
+renamed to the unexported `unmarshalInternal`, so external callers use
+`Unmarshal` (ordered map) or `UnmarshalWithOptions` (typed destination).
+
+Encoding is unchanged apart from the default indentation, which is now four
+spaces (`DefaultOptions().IndentBy == "    "`); use `Marshal` or
+`MarshalWithOptions` as before.
