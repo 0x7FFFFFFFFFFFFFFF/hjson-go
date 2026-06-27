@@ -56,15 +56,26 @@ type DecoderOptions struct {
 	// WhitespaceAsComments instead is set to false, only actual comments are
 	// stored as comments in Node structs.
 	WhitespaceAsComments bool
+	// AllowKeysWithoutValues makes it possible to use an object key without any
+	// value, for example to let the mere presence of the key act as a flag. A
+	// key is treated as having no value if no value starts on the same line as
+	// the ':' and the next meaningful content either ends the enclosing object
+	// (or the input) or looks like another key (a key name followed by ':').
+	// Values that continue on a following line (a multiline string, an array, an
+	// object or a quoteless string) are still treated as the value of the key.
+	// Such valueless keys are unmarshalled with a null value. This option is
+	// enabled by default; set it to false to require every key to have a value.
+	AllowKeysWithoutValues bool
 }
 
 // DefaultDecoderOptions returns the default decoding options.
 func DefaultDecoderOptions() DecoderOptions {
 	return DecoderOptions{
-		UseJSONNumber:         false,
-		DisallowUnknownFields: false,
-		DisallowDuplicateKeys: false,
-		WhitespaceAsComments:  true,
+		UseJSONNumber:          false,
+		DisallowUnknownFields:  false,
+		DisallowDuplicateKeys:  false,
+		WhitespaceAsComments:   true,
+		AllowKeysWithoutValues: true,
 	}
 }
 
@@ -625,6 +636,151 @@ func (p *hjsonParser) readArray(dest reflect.Value, t reflect.Type) (value inter
 	return nil, p.errAt("End of input while parsing an array (did you forget a closing ']'?)")
 }
 
+// valueIsMissing reports whether the key that was just parsed (the ':' has
+// already been consumed) has no value. A key has no value if no value starts on
+// the same line as the ':' and the next meaningful content either ends the
+// enclosing object (or the input) or looks like another key (a key name
+// followed by ':'). A value that continues on a following line (a multiline
+// string, an array, an object or a quoteless string) is still treated as the
+// value of the key. valueIsMissing is only consulted when
+// DecoderOptions.AllowKeysWithoutValues is enabled.
+func (p *hjsonParser) valueIsMissing() bool {
+	n := len(p.data)
+	i := p.at - 1
+	// Skip inline whitespace right after the ':'.
+	for i >= 0 && i < n && (p.data[i] == ' ' || p.data[i] == '\t') {
+		i++
+	}
+	if i < 0 || i >= n {
+		// EOF right after the ':'.
+		return true
+	}
+	switch c := p.data[i]; {
+	case c == '\n' || c == '\r' || c == '#' ||
+		c == '/' && i+1 < n && (p.data[i+1] == '/' || p.data[i+1] == '*'):
+		// Only a comment or the end of the line follows the ':', so any value
+		// would have to start on a following line. Look ahead to find out
+		// whether such a value exists.
+		return p.nextContentEndsOrIsKey(i)
+	default:
+		// Anything else on the same line (a value, or an invalid '}', ']' or
+		// ',') is handled by the normal value parser, which also rejects the
+		// cases that Hjson considers errors.
+		return false
+	}
+}
+
+// nextContentEndsOrIsKey skips whitespace and comments starting at index i and
+// reports whether the next meaningful content ends the enclosing object (or the
+// input) or looks like another key. It returns false when the next content is a
+// value (an object, array, string or quoteless string) that belongs to the
+// current key.
+func (p *hjsonParser) nextContentEndsOrIsKey(i int) bool {
+	n := len(p.data)
+	i = p.skipWhiteAndComments(i)
+	if i >= n {
+		return true
+	}
+	switch p.data[i] {
+	case '}', ']':
+		return true
+	case '{', '[':
+		return false
+	}
+	return p.tokenIsKey(i)
+}
+
+// skipWhiteAndComments returns the index of the first character at or after i
+// that is neither whitespace nor part of a comment.
+func (p *hjsonParser) skipWhiteAndComments(i int) int {
+	n := len(p.data)
+	for i < n {
+		switch c := p.data[i]; {
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			i++
+		case c == '#' || c == '/' && i+1 < n && p.data[i+1] == '/':
+			for i < n && p.data[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < n && p.data[i+1] == '*':
+			i += 2
+			for i+1 < n && !(p.data[i] == '*' && p.data[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			return i
+		}
+	}
+	return n
+}
+
+// tokenIsKey reports whether the token starting at index i (which is neither
+// whitespace nor a brace) is a key, i.e. a key name terminated by ':'. A
+// quoteless token is a key only if a ':' terminates it before any whitespace,
+// punctuator or end of line. A quoted token is a key only if a ':' follows the
+// closing quote (apart from inline whitespace); a triple-quoted multiline
+// string is always a value.
+func (p *hjsonParser) tokenIsKey(i int) bool {
+	n := len(p.data)
+	if i >= n {
+		return false
+	}
+	if c := p.data[i]; c == '"' || c == '\'' {
+		if c == '\'' && i+2 < n && p.data[i+1] == '\'' && p.data[i+2] == '\'' {
+			return false
+		}
+		return p.colonFollows(p.skipQuoted(i))
+	}
+	sawSpace := false
+	for ; i < n; i++ {
+		switch c := p.data[i]; {
+		case c == ':':
+			return true
+		case c == ' ' || c == '\t':
+			sawSpace = true
+		case c == '\n' || c == '\r':
+			return false
+		case isPunctuatorChar(c):
+			return false
+		case sawSpace:
+			// Non-space content after a space but before any ':' means this is a
+			// quoteless string value, not a key name.
+			return false
+		}
+	}
+	return false
+}
+
+// skipQuoted returns the index just after the closing quote of the quoted token
+// that starts at index i, or the index of the end of the line / input if the
+// token is not terminated on its line.
+func (p *hjsonParser) skipQuoted(i int) int {
+	n := len(p.data)
+	q := p.data[i]
+	for i++; i < n; i++ {
+		switch p.data[i] {
+		case '\\':
+			i++
+		case q:
+			return i + 1
+		case '\n', '\r':
+			return i
+		}
+	}
+	return n
+}
+
+// colonFollows reports whether the first character at or after index i that is
+// not inline whitespace is a ':'.
+func (p *hjsonParser) colonFollows(i int) bool {
+	n := len(p.data)
+	for i < n && (p.data[i] == ' ' || p.data[i] == '\t') {
+		i++
+	}
+	return i < n && p.data[i] == ':'
+}
+
 func (p *hjsonParser) readObject(
 	withoutBraces bool,
 	dest reflect.Value,
@@ -733,7 +889,19 @@ func (p *hjsonParser) readObject(
 
 		// duplicate keys overwrite the previous value
 		var val interface{}
-		if val, err = p.readValue(newDest, currentElemType); err != nil {
+		if p.AllowKeysWithoutValues && p.valueIsMissing() {
+			// Only the key name is present (no value on the same line). Record
+			// the key with a null value so that its mere presence is preserved.
+			if val, err = p.maybeWrapNode(&Node{}, nil); err != nil {
+				return nil, err
+			}
+			ciValueAfter := p.getCommentAfter()
+			if p.nodeDestination {
+				if node, ok := val.(*Node); ok {
+					p.setComment1(&node.Cm.After, ciValueAfter)
+				}
+			}
+		} else if val, err = p.readValue(newDest, currentElemType); err != nil {
 			return nil, err
 		}
 		if p.nodeDestination {

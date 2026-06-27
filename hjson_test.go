@@ -232,6 +232,113 @@ func TestNilValue(t *testing.T) {
 	}
 }
 
+func TestAllowKeysWithoutValues(t *testing.T) {
+	opt := DefaultDecoderOptions()
+	opt.AllowKeysWithoutValues = true
+
+	t.Run("braceless flat object", func(t *testing.T) {
+		input := []byte("cdc-gen:\ndb-name: *\ntable-name: *\n")
+		var m map[string]interface{}
+		if err := UnmarshalWithOptions(input, &m, opt); err != nil {
+			t.Fatal(err)
+		}
+		if len(m) != 3 {
+			t.Fatalf("expected 3 keys, got %d: %#v", len(m), m)
+		}
+		if v, ok := m["cdc-gen"]; !ok || v != nil {
+			t.Errorf("cdc-gen = %#v (present=%v), want nil present", v, ok)
+		}
+		if m["db-name"] != "*" {
+			t.Errorf("db-name = %#v, want \"*\"", m["db-name"])
+		}
+		if m["table-name"] != "*" {
+			t.Errorf("table-name = %#v, want \"*\"", m["table-name"])
+		}
+	})
+
+	t.Run("braced object, end and comment", func(t *testing.T) {
+		input := []byte("{\n  a: 1\n  marker:\n  noted: # still no value\n  b: 2\n  last:\n}")
+		var m map[string]interface{}
+		if err := UnmarshalWithOptions(input, &m, opt); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]interface{}{
+			"a": 1.0, "marker": nil, "noted": nil, "b": 2.0, "last": nil,
+		}
+		if len(m) != len(want) {
+			t.Fatalf("got %d keys: %#v", len(m), m)
+		}
+		for k, wv := range want {
+			if v, ok := m[k]; !ok || v != wv {
+				t.Errorf("key %q = %#v (present=%v), want %#v", k, v, ok, wv)
+			}
+		}
+	})
+
+	t.Run("default enables standalone keys", func(t *testing.T) {
+		input := []byte("cdc-gen:\ndb-name: *\ntable-name: *\n")
+		var m map[string]interface{}
+		if err := Unmarshal(input, &m); err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := m["cdc-gen"]; !ok || v != nil {
+			t.Errorf("cdc-gen = %#v (present=%v), want nil present", v, ok)
+		}
+		if m["db-name"] != "*" || m["table-name"] != "*" {
+			t.Errorf("unexpected values: %#v", m)
+		}
+	})
+
+	t.Run("next-line values still pair with their key", func(t *testing.T) {
+		input := []byte("arr:\n  [ 1, 2 ]\nobj:\n  { a: 1 }\nqs:\n  some text\n")
+		var m map[string]interface{}
+		if err := Unmarshal(input, &m); err != nil {
+			t.Fatal(err)
+		}
+		if arr, ok := m["arr"].([]interface{}); !ok || len(arr) != 2 {
+			t.Errorf("arr = %#v, want 2 elements", m["arr"])
+		}
+		if obj, ok := m["obj"].(map[string]interface{}); !ok || obj["a"] != 1.0 {
+			t.Errorf("obj = %#v, want {a:1}", m["obj"])
+		}
+		if m["qs"] != "some text" {
+			t.Errorf("qs = %#v, want \"some text\"", m["qs"])
+		}
+	})
+
+	t.Run("opt-out restores legacy next-line behavior", func(t *testing.T) {
+		off := DefaultDecoderOptions()
+		off.AllowKeysWithoutValues = false
+		input := []byte("cdc-gen:\ndb-name: *\n")
+		var m map[string]interface{}
+		if err := UnmarshalWithOptions(input, &m, off); err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := m["cdc-gen"]; !ok || v != "db-name: *" {
+			t.Errorf("cdc-gen = %#v (present=%v), want \"db-name: *\"", v, ok)
+		}
+		if _, ok := m["db-name"]; ok {
+			t.Errorf("did not expect db-name as a separate key: %#v", m)
+		}
+	})
+
+	t.Run("node round-trip", func(t *testing.T) {
+		input := []byte("cdc-gen:\ndb-name: *\n")
+		var node Node
+		if err := UnmarshalWithOptions(input, &node, opt); err != nil {
+			t.Fatal(err)
+		}
+		out, err := Marshal(node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(fixEOL(out))
+		if !strings.Contains(got, "cdc-gen:") || !strings.Contains(got, "db-name: *") {
+			t.Errorf("unexpected marshaled output:\n%s", got)
+		}
+	})
+}
+
 func TestReadmeUnmarshalToStruct(t *testing.T) {
 	type Sample struct {
 		Rate  int

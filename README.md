@@ -313,6 +313,34 @@ Output:
 ```
 
 
+## Keys without values
+
+Sometimes it is convenient to let the mere presence of a key carry meaning,
+without supplying any value. An object key is therefore allowed to have no value
+at all, in which case it is unmarshalled with a `null` value.
+
+A key is treated as having no value if no value starts on the same line as the
+`:` and the next meaningful content either ends the enclosing object (or the
+input) or looks like another key (a key name followed by `:`). Values that
+continue on a following line — a multiline string, an array, an object or a
+quoteless string — are still treated as the value of the key.
+
+```go
+var dat map[string]interface{}
+hjson.Unmarshal([]byte(`
+cdc-gen:
+db-name: *
+table-name: *
+`), &dat)
+// dat == map[string]interface{}{"cdc-gen": nil, "db-name": "*", "table-name": "*"}
+```
+
+This behavior is controlled by the decoding option *AllowKeysWithoutValues*,
+which is enabled by default. Set it to `false` to require every key to have a
+value (in which case the value of `cdc-gen` above would instead continue on the
+following line and become the string `db-name: *`).
+
+
 ## Type ambiguity
 
 Hjson allows quoteless strings. But if a value is a valid number, boolean or `null` then it will be unmarshalled into that type instead of a string when unmarshalling into `interface{}`. This can lead to unintended consequences if the creator of an Hjson file meant to write a string but didn't think of that the quoteless string they wrote also was a valid number.

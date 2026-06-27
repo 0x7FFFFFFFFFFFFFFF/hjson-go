@@ -49,6 +49,7 @@ func main() {
 	var showVersion = flag.Bool("v", false, "Show version.")
 	var preserveKeyOrder = flag.Bool("preserveKeyOrder", false, "Preserve key order in objects/maps.")
 	var preserveComments = flag.Bool("preserveComments", false, "Preserve comments in Hjson output (and key order in any output).")
+	var allowKeysWithoutValues = flag.Bool("allowKeysWithoutValues", true, "Allow object keys that have no value, recorded with a null value (enabled by default; use -allowKeysWithoutValues=false to disable).")
 
 	flag.Parse()
 	if *help || flag.NArg() > 1 {
@@ -71,14 +72,15 @@ func main() {
 		var value interface{}
 		var err error
 
+		decOpt := hjson.DefaultDecoderOptions()
+		decOpt.AllowKeysWithoutValues = *allowKeysWithoutValues
 		if *preserveKeyOrder || *preserveComments {
+			decOpt.WhitespaceAsComments = false
 			var node *hjson.Node
-			opt := hjson.DefaultDecoderOptions()
-			opt.WhitespaceAsComments = false
-			err = hjson.UnmarshalWithOptions(data, &node, opt)
+			err = hjson.UnmarshalWithOptions(data, &node, decOpt)
 			value = node
 		} else {
-			err = hjson.Unmarshal(data, &value)
+			err = hjson.UnmarshalWithOptions(data, &value, decOpt)
 		}
 		if err != nil {
 			return nil, err
