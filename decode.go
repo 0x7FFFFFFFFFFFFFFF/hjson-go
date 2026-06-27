@@ -529,11 +529,12 @@ func (p *hjsonParser) readTfnns(dest reflect.Value, t reflect.Type) (interface{}
 
 			if isEol {
 				raw := value.String()
-				// A quoteless string that contains two consecutive commas is
-				// treated as an array. Such a value may be written across several
-				// lines, so keep reading while the next line is a continuation
-				// rather than a new key or the end of the enclosing object/array.
-				if strings.Contains(raw, ",,") {
+				// A quoteless string that contains two consecutive commas (",,")
+				// or pipes ("||") is treated as an array. Such a value may be
+				// written across several lines, so keep reading while the next line
+				// is a continuation rather than a new key or the end of the
+				// enclosing object/array.
+				if strings.Contains(raw, ",,") || strings.Contains(raw, "||") {
 					if p.ch != 0 {
 						if idx, cont := p.quotelessContinues(p.at); cont {
 							value.WriteByte('\n')
@@ -551,16 +552,59 @@ func (p *hjsonParser) readTfnns(dest reflect.Value, t reflect.Type) (interface{}
 	}
 }
 
-// quotelessArraySep splits a quoteless comma-array value into its elements. It
-// matches the canonical ",," separator (with any surrounding whitespace) and
-// line breaks, since such a value may be written across several lines.
+// quotelessArraySep splits the inner ",," level of a quoteless array value into
+// its elements. It matches the canonical ",," separator (with any surrounding
+// whitespace) and line breaks, since such a value may be written across several
+// lines.
 var quotelessArraySep = regexp.MustCompile(`\s*,,\s*|\r?\n`)
 
-// splitQuotelessArray converts a quoteless string that contains two consecutive
-// commas into an array of strings. The raw value (which may span several lines)
-// is split on quotelessArraySep, every element is trimmed and empty elements
-// (for example the one produced by a trailing ",,") are dropped.
+// quotelessOuterSep splits the outer "||" level of a quoteless array value. A
+// value that contains "||" becomes a nested array (an array of arrays): it is
+// first split on "||" (with any surrounding whitespace), and each element is
+// then split again on the ",," level by quotelessArraySep.
+var quotelessOuterSep = regexp.MustCompile(`\s*\|\|\s*`)
+
+// splitQuotelessArray converts a quoteless string into an array. If the value
+// contains "||" it is split on "||" first to form a primary array, and every
+// element is then split on ",," to form a nested array (an array of arrays).
+// Otherwise the value is split on ",," into a flat array of strings. The raw
+// value may span several lines; every element is trimmed and empty elements
+// (for example those produced by a trailing ",," or "||") are dropped.
 func (p *hjsonParser) splitQuotelessArray(node *Node, raw string) (interface{}, error) {
+	// "||" takes priority over ",,": split on it first to build the primary
+	// array, then split each element on ",," to build the nested sub-arrays.
+	if strings.Contains(raw, "||") {
+		outerParts := quotelessOuterSep.Split(raw, -1)
+		array := make([]interface{}, 0, len(outerParts))
+		for _, outer := range outerParts {
+			inner, err := p.splitDoubleComma(outer)
+			if err != nil {
+				return nil, err
+			}
+			if len(inner) == 0 {
+				continue
+			}
+			elem, err := p.maybeWrapNode(&Node{}, inner)
+			if err != nil {
+				return nil, err
+			}
+			array = append(array, elem)
+		}
+		return p.maybeWrapNode(node, array)
+	}
+
+	inner, err := p.splitDoubleComma(raw)
+	if err != nil {
+		return nil, err
+	}
+	return p.maybeWrapNode(node, inner)
+}
+
+// splitDoubleComma splits raw on the ",," separator (and line breaks), trims
+// every element and drops empty ones, returning the resulting elements. Each
+// element is wrapped with maybeWrapNode so that Node destinations receive
+// *Node elements (mirroring readArray).
+func (p *hjsonParser) splitDoubleComma(raw string) ([]interface{}, error) {
 	parts := quotelessArraySep.Split(raw, -1)
 	array := make([]interface{}, 0, len(parts))
 	for _, part := range parts {
@@ -574,7 +618,7 @@ func (p *hjsonParser) splitQuotelessArray(node *Node, raw string) (interface{}, 
 		}
 		array = append(array, elem)
 	}
-	return p.maybeWrapNode(node, array)
+	return array, nil
 }
 
 // quotelessContinues reports whether the text starting at index i (the index

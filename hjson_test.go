@@ -272,6 +272,123 @@ func TestQuotelessCommaArray(t *testing.T) {
 	}
 }
 
+func TestQuotelessPipeArray(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  interface{}
+	}{
+		{
+			name:  "pipes split outer, commas split inner",
+			input: "text: ab,, cd ef || gh,, ij",
+			want: map[string]interface{}{
+				"text": []interface{}{
+					[]interface{}{"ab", "cd ef"},
+					[]interface{}{"gh", "ij"},
+				},
+			},
+		},
+		{
+			name:  "each group a single element",
+			input: "text: a || b || c",
+			want: map[string]interface{}{
+				"text": []interface{}{
+					[]interface{}{"a"},
+					[]interface{}{"b"},
+					[]interface{}{"c"},
+				},
+			},
+		},
+		{
+			name:  "mixed comma and pipe groups",
+			input: "text: a,, b || c",
+			want: map[string]interface{}{
+				"text": []interface{}{
+					[]interface{}{"a", "b"},
+					[]interface{}{"c"},
+				},
+			},
+		},
+		{
+			name:  "trailing pipe dropped",
+			input: "text: a || b ||",
+			want: map[string]interface{}{
+				"text": []interface{}{
+					[]interface{}{"a"},
+					[]interface{}{"b"},
+				},
+			},
+		},
+		{
+			name:  "trailing double comma inside group dropped",
+			input: "text: a,, || b",
+			want: map[string]interface{}{
+				"text": []interface{}{
+					[]interface{}{"a"},
+					[]interface{}{"b"},
+				},
+			},
+		},
+		{
+			name:  "numeric elements become strings",
+			input: "ports: 80,, 443 || 8080,, 9090",
+			want: map[string]interface{}{
+				"ports": []interface{}{
+					[]interface{}{"80", "443"},
+					[]interface{}{"8080", "9090"},
+				},
+			},
+		},
+		{
+			name:  "multiline continuation",
+			input: "matrix: 1,, 2 ||\n3,, 4\nother: z\n",
+			want: map[string]interface{}{
+				"matrix": []interface{}{
+					[]interface{}{"1", "2"},
+					[]interface{}{"3", "4"},
+				},
+				"other": "z",
+			},
+		},
+		{
+			name:  "stops at next key",
+			input: "a: x || y\nb: z\n",
+			want: map[string]interface{}{
+				"a": []interface{}{
+					[]interface{}{"x"},
+					[]interface{}{"y"},
+				},
+				"b": "z",
+			},
+		},
+		{
+			name:  "single pipe stays string",
+			input: "text: a | b | c",
+			want: map[string]interface{}{
+				"text": "a | b | c",
+			},
+		},
+		{
+			name:  "double comma only stays flat",
+			input: "text: a,, b,, c",
+			want: map[string]interface{}{
+				"text": []interface{}{"a", "b", "c"},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		var got interface{}
+		if err := unmarshalInternal([]byte(c.input), &got); err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s:\n got: %#v\nwant: %#v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestUnmarshalReturnsOrderedMap(t *testing.T) {
 	// Keys are intentionally not in alphabetical order, to prove that the
 	// returned structure preserves the input order instead of sorting.
