@@ -109,7 +109,7 @@ func TestEncodeStruct(t *testing.T) {
 	if !bytes.Contains(buf, []byte("J: <\n")) {
 		t.Errorf("Missing 'J: <' in marshal output:\n%s", string(buf))
 	}
-	err = Unmarshal(buf, &output)
+	err = unmarshalInternal(buf, &output)
 	if err != nil {
 		t.Error(err)
 	}
@@ -147,7 +147,7 @@ func TestEncodeStruct(t *testing.T) {
 		t.Error(err)
 	}
 	output = map[string]interface{}{}
-	err = Unmarshal(buf, &output)
+	err = unmarshalInternal(buf, &output)
 	if err != nil {
 		t.Error(err)
 	}
@@ -681,7 +681,7 @@ func marshalUnmarshal(t *testing.T, input string) {
 		return
 	}
 	var resultPlain string
-	err = Unmarshal(buf, &resultPlain)
+	err = unmarshalInternal(buf, &resultPlain)
 	if err != nil {
 		t.Error(err)
 		return
@@ -702,7 +702,7 @@ func marshalUnmarshal(t *testing.T, input string) {
 		return
 	}
 	var out map[string]interface{}
-	err = Unmarshal(buf, &out)
+	err = unmarshalInternal(buf, &out)
 	if err != nil {
 		t.Error(err)
 		return
@@ -783,7 +783,7 @@ func TestMarshalDuplicateFields(t *testing.T) {
 	}
 
 	var a2 A
-	err = Unmarshal([]byte("rate: 5"), &a2)
+	err = unmarshalInternal([]byte("rate: 5"), &a2)
 	if err != nil {
 		t.Error(err)
 	}
@@ -796,7 +796,7 @@ func TestMarshalDuplicateFields(t *testing.T) {
 		B int `json:"rate"`
 	}
 	var b B
-	err = Unmarshal([]byte("rate: 5"), &b)
+	err = unmarshalInternal([]byte("rate: 5"), &b)
 	if err != nil {
 		t.Error(err)
 	}
@@ -821,7 +821,7 @@ func TestMarshalMapIntKey(t *testing.T) {
 	}
 
 	m2 := map[int]bool{}
-	err = Unmarshal(buf, &m2)
+	err = unmarshalInternal(buf, &m2)
 	if err != nil {
 		t.Error(err)
 	}

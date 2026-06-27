@@ -117,7 +117,7 @@ func TestUnmarshalJSON_2(t *testing.T) {
 
 func TestUnmarshalHJSON(t *testing.T) {
 	var om *OrderedMap
-	err := Unmarshal([]byte(`{"B":"first","C":3,"sub":{"z":7,"y":8},"A":2}`), &om)
+	err := unmarshalInternal([]byte(`{"B":"first","C":3,"sub":{"z":7,"y":8},"A":2}`), &om)
 	if err != nil {
 		t.Error(err)
 	}
@@ -131,7 +131,7 @@ func TestUnmarshalHJSON(t *testing.T) {
 
 func TestUnmarshalHJSON_2(t *testing.T) {
 	var om OrderedMap
-	err := Unmarshal([]byte(`{"B":"first","C":3,"sub":{"z":7,"y":8},"A":2}`), &om)
+	err := unmarshalInternal([]byte(`{"B":"first","C":3,"sub":{"z":7,"y":8},"A":2}`), &om)
 	if err != nil {
 		t.Error(err)
 	}

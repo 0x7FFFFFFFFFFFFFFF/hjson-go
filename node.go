@@ -411,5 +411,5 @@ func (c Node) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON is an implementation of the json.Unmarshaler interface,
 // enabling hjson.Node to be used as destination for json.Unmarshal().
 func (c *Node) UnmarshalJSON(b []byte) error {
-	return Unmarshal(b, c)
+	return unmarshalInternal(b, c)
 }

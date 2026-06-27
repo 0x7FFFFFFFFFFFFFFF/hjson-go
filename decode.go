@@ -1180,11 +1180,37 @@ func (p *hjsonParser) checkTrailing() (commentInfo, error) {
 	return ci, nil
 }
 
-// Unmarshal parses the Hjson-encoded data using default options and stores the
-// result in the value pointed to by v.
+// Unmarshal parses the Hjson-encoded data and returns it as an ordered tree,
+// preserving the key order from the input.
+//
+// The returned *OrderedMap represents the root object. Nested objects are also
+// *OrderedMap, arrays are []interface{}, and leaf values are of type string,
+// float64, bool or nil. Iterate in order via the Keys slice, e.g.:
+//
+//	om, err := hjson.Unmarshal(data)
+//	for _, k := range om.Keys {
+//		v := om.Map[k]
+//	}
+//
+// The Hjson root must be an object. To decode into a Go struct, an interface{},
+// or an *hjson.Node (which additionally preserves comments), use
+// UnmarshalWithOptions.
+func Unmarshal(data []byte) (*OrderedMap, error) {
+	var om OrderedMap
+	if err := unmarshalInternal(data, &om); err != nil {
+		return nil, err
+	}
+	return &om, nil
+}
+
+// unmarshalInternal parses the Hjson-encoded data using default options and
+// stores the result in the value pointed to by v. It is the package-internal
+// decoder used by Unmarshal and by the json.Unmarshaler implementations; it is
+// intentionally unexported so external callers go through Unmarshal or
+// UnmarshalWithOptions.
 //
 // See UnmarshalWithOptions.
-func Unmarshal(data []byte, v interface{}) error {
+func unmarshalInternal(data []byte, v interface{}) error {
 	return UnmarshalWithOptions(data, v, DefaultDecoderOptions())
 }
 

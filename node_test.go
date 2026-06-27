@@ -28,7 +28,7 @@ func TestNode1(t *testing.T) {
 a: 2`
 
 	var node *Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -44,7 +44,7 @@ a: 2
 /* Last comment */`
 
 	var node *Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -152,7 +152,7 @@ func TestNode3(t *testing.T) {
 /* Last comment */`
 
 	var node *Node
-	Unmarshal([]byte(txt), &node)
+	unmarshalInternal([]byte(txt), &node)
 
 	if node.Len() != 2 {
 		t.Errorf("Unexpected slice length: %v", node.Len())
@@ -241,7 +241,7 @@ a: 2
 /* Last comment */`
 
 	var node *Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -324,7 +324,7 @@ c: 4
 b: 5`
 
 	var node *Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -350,7 +350,7 @@ a: 2
 `
 
 	var node *Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -464,7 +464,7 @@ func TestNodeNoPointer(t *testing.T) {
 setting2: true  // yes`
 
 	var node Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -494,7 +494,7 @@ func TestNodeOrderedMapInsertDelete(t *testing.T) {
 b: 2`
 
 	var node Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}
@@ -548,7 +548,7 @@ func TestNodeSliceInsertDelete(t *testing.T) {
 ]`
 
 	var node Node
-	err := Unmarshal([]byte(txt), &node)
+	err := unmarshalInternal([]byte(txt), &node)
 	if err != nil {
 		t.Error(err)
 	}

@@ -163,5 +163,5 @@ func (c *OrderedMap) MarshalJSON() ([]byte, error) {
 func (c *OrderedMap) UnmarshalJSON(b []byte) error {
 	c.Keys = nil
 	c.Map = map[string]interface{}{}
-	return Unmarshal(b, c)
+	return unmarshalInternal(b, c)
 }

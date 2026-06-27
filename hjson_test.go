@@ -62,7 +62,7 @@ func run(t *testing.T, file string) {
 
 	testContent := getTestContent(name)
 	var data interface{}
-	if err := Unmarshal(testContent, &data); err != nil {
+	if err := unmarshalInternal(testContent, &data); err != nil {
 		if !shouldFail {
 			t.Error(err)
 		}
@@ -113,7 +113,7 @@ func run(t *testing.T, file string) {
 	var actualCm3 []byte
 	{
 		var node Node
-		if err := Unmarshal(testContent, &node); err != nil {
+		if err := unmarshalInternal(testContent, &node); err != nil {
 			t.Error(err)
 			return
 		}
@@ -154,7 +154,7 @@ func run(t *testing.T, file string) {
 	}
 	{
 		var roundTrip interface{}
-		err = Unmarshal(actualCm2, &roundTrip)
+		err = unmarshalInternal(actualCm2, &roundTrip)
 		if err != nil {
 			t.Error(err)
 			return
@@ -172,7 +172,7 @@ func run(t *testing.T, file string) {
 	}
 	{
 		var roundTrip interface{}
-		err = Unmarshal(actualCm3, &roundTrip)
+		err = unmarshalInternal(actualCm3, &roundTrip)
 		if err != nil {
 			t.Error(err)
 			return
@@ -262,7 +262,7 @@ func TestQuotelessCommaArray(t *testing.T) {
 
 	for _, c := range cases {
 		var got interface{}
-		if err := Unmarshal([]byte(c.input), &got); err != nil {
+		if err := unmarshalInternal([]byte(c.input), &got); err != nil {
 			t.Errorf("%s: unexpected error: %v", c.name, err)
 			continue
 		}
@@ -272,15 +272,62 @@ func TestQuotelessCommaArray(t *testing.T) {
 	}
 }
 
+func TestUnmarshalReturnsOrderedMap(t *testing.T) {
+	// Keys are intentionally not in alphabetical order, to prove that the
+	// returned structure preserves the input order instead of sorting.
+	input := []byte(`{
+  DB2: {
+    pubB: ["TB1", "TB2"]
+    pubA: ["TB3"]
+  }
+  DB1: {
+    pubZ: ["TB4", "TB5"]
+  }
+}`)
+
+	om, err := Unmarshal(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := om.Keys, []string{"DB2", "DB1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("root key order = %v, want %v", got, want)
+	}
+
+	db2, ok := om.Map["DB2"].(*OrderedMap)
+	if !ok {
+		t.Fatalf("nested object should be *OrderedMap, got %T", om.Map["DB2"])
+	}
+	if got, want := db2.Keys, []string{"pubB", "pubA"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("DB2 key order = %v, want %v", got, want)
+	}
+
+	pubB, ok := db2.Map["pubB"].([]interface{})
+	if !ok {
+		t.Fatalf("array leaf should be []interface{}, got %T", db2.Map["pubB"])
+	}
+	if got, want := pubB, []interface{}{"TB1", "TB2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("DB2.pubB = %v, want %v", got, want)
+	}
+}
+
+func TestUnmarshalNonObjectRoot(t *testing.T) {
+	// The ordered Unmarshal returns an *OrderedMap, so the Hjson root must be
+	// an object; a non-object root must return an error rather than panicking.
+	if _, err := Unmarshal([]byte(`[1, 2, 3]`)); err == nil {
+		t.Errorf("expected an error for a non-object (array) root")
+	}
+}
+
 func TestInvalidDestinationType(t *testing.T) {
 	input := []byte(`[1,2,3,4]`)
 	var dat map[string]interface{}
-	err := Unmarshal(input, &dat)
+	err := unmarshalInternal(input, &dat)
 	if err == nil {
 		t.Errorf("Should have failed when trying to unmarshal an array to a map.")
 	}
 
-	err = Unmarshal(input, 3)
+	err = unmarshalInternal(input, 3)
 	if err == nil {
 		t.Errorf("Should have failed when trying to unmarshal into non-pointer.")
 	}
@@ -293,7 +340,7 @@ func TestStructDestinationType(t *testing.T) {
 		C string
 		D string
 	}
-	err := Unmarshal([]byte("A: 1\nB:2\nC: \u003c\nD: <"), &obj)
+	err := unmarshalInternal([]byte("A: 1\nB:2\nC: \u003c\nD: <"), &obj)
 	if err != nil {
 		t.Error(err)
 	}
@@ -304,7 +351,7 @@ func TestStructDestinationType(t *testing.T) {
 
 func TestNilValue(t *testing.T) {
 	var dat interface{}
-	err := Unmarshal([]byte(`[1,2,3,4]`), dat)
+	err := unmarshalInternal([]byte(`[1,2,3,4]`), dat)
 	if err == nil {
 		panic("Passing v = <nil> to Unmarshal should return an error")
 	}
@@ -356,7 +403,7 @@ func TestAllowKeysWithoutValues(t *testing.T) {
 	t.Run("default enables standalone keys", func(t *testing.T) {
 		input := []byte("cdc-gen:\ndb-name: *\ntable-name: *\n")
 		var m map[string]interface{}
-		if err := Unmarshal(input, &m); err != nil {
+		if err := unmarshalInternal(input, &m); err != nil {
 			t.Fatal(err)
 		}
 		if v, ok := m["cdc-gen"]; !ok || v != nil {
@@ -370,7 +417,7 @@ func TestAllowKeysWithoutValues(t *testing.T) {
 	t.Run("next-line values still pair with their key", func(t *testing.T) {
 		input := []byte("arr:\n  [ 1, 2 ]\nobj:\n  { a: 1 }\nqs:\n  some text\n")
 		var m map[string]interface{}
-		if err := Unmarshal(input, &m); err != nil {
+		if err := unmarshalInternal(input, &m); err != nil {
 			t.Fatal(err)
 		}
 		if arr, ok := m["arr"].([]interface{}); !ok || len(arr) != 2 {
@@ -441,7 +488,7 @@ func TestReadmeUnmarshalToStruct(t *testing.T) {
 
 	{
 		var sample Sample
-		Unmarshal(sampleText, &sample)
+		unmarshalInternal(sampleText, &sample)
 		if sample.Rate != 1000 || sample.Array[0] != "foo" {
 			t.Errorf("Unexpected sample values: %+v", sample)
 		}
@@ -449,7 +496,7 @@ func TestReadmeUnmarshalToStruct(t *testing.T) {
 
 	{
 		var sampleAlias SampleAlias
-		Unmarshal(sampleText, &sampleAlias)
+		unmarshalInternal(sampleText, &sampleAlias)
 		if sampleAlias.Rett != 1000 || sampleAlias.Ashtray[0] != "foo" {
 			t.Errorf("Unexpected sampleAlias values: %+v", sampleAlias)
 		}
@@ -462,7 +509,7 @@ func TestUnknownFields(t *testing.T) {
 		C int
 	}{}
 	b := []byte("B: b\nC: 3\nD: 4\n")
-	err := Unmarshal(b, &v)
+	err := unmarshalInternal(b, &v)
 	if err != nil {
 		t.Error(err)
 	}
@@ -588,7 +635,7 @@ func TestUnmarshalInterface(t *testing.T) {
     A: second
 }`)
 	var objA testOrderedMapA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -613,7 +660,7 @@ func TestUnmarshalInterface(t *testing.T) {
 	}
 
 	var objB testOrderedMapB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -645,7 +692,7 @@ func TestUnmarshalInterfaceElemType(t *testing.T) {
 	C: third
 }`)
 	var objA testOrderedMapA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -663,7 +710,7 @@ func TestUnmarshalInterfaceElemType(t *testing.T) {
 
 	objA = testOrderedMapA{}
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -672,7 +719,7 @@ func TestUnmarshalInterfaceElemType(t *testing.T) {
 	}
 
 	var objB testOrderedMapB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -690,7 +737,7 @@ func TestUnmarshalInterfaceElemType(t *testing.T) {
 
 	objB = testOrderedMapB{}
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -711,7 +758,7 @@ func TestUnmarshalSliceMapElemType(t *testing.T) {
   }
 ]`)
 	var objA []testOrderedMapA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -736,7 +783,7 @@ func TestUnmarshalSliceMapElemType(t *testing.T) {
 
 	objA = nil
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -745,7 +792,7 @@ func TestUnmarshalSliceMapElemType(t *testing.T) {
 	}
 
 	var objB []testOrderedMapB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -770,7 +817,7 @@ func TestUnmarshalSliceMapElemType(t *testing.T) {
 
 	objB = nil
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -791,7 +838,7 @@ func TestUnmarshalSliceMapPointerElemType(t *testing.T) {
   }
 ]`)
 	var objA []*testOrderedMapA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -816,7 +863,7 @@ func TestUnmarshalSliceMapPointerElemType(t *testing.T) {
 
 	objA = nil
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -825,7 +872,7 @@ func TestUnmarshalSliceMapPointerElemType(t *testing.T) {
 	}
 
 	var objB []*testOrderedMapB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -850,7 +897,7 @@ func TestUnmarshalSliceMapPointerElemType(t *testing.T) {
 
 	objB = nil
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -877,7 +924,7 @@ func TestUnmarshalStructElemType(t *testing.T) {
 	}
 
 	var objA tsA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -902,7 +949,7 @@ func TestUnmarshalStructElemType(t *testing.T) {
 
 	objA = tsA{}
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -916,7 +963,7 @@ func TestUnmarshalStructElemType(t *testing.T) {
 	}
 
 	var objB tsB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -941,7 +988,7 @@ func TestUnmarshalStructElemType(t *testing.T) {
 
 	objB = tsB{}
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -968,7 +1015,7 @@ func TestUnmarshalStructPointerElemType(t *testing.T) {
 	}
 
 	var objA tsA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -993,7 +1040,7 @@ func TestUnmarshalStructPointerElemType(t *testing.T) {
 
 	objA = tsA{}
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1007,7 +1054,7 @@ func TestUnmarshalStructPointerElemType(t *testing.T) {
 	}
 
 	var objB tsB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1032,7 +1079,7 @@ func TestUnmarshalStructPointerElemType(t *testing.T) {
 
 	objB = tsB{}
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1048,7 +1095,7 @@ func TestUnmarshalSliceElemType(t *testing.T) {
 ]`)
 
 	var objA testSliceElemTyperA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1063,7 +1110,7 @@ func TestUnmarshalSliceElemType(t *testing.T) {
 
 	objA = nil
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1072,7 +1119,7 @@ func TestUnmarshalSliceElemType(t *testing.T) {
 	}
 
 	var objB testSliceElemTyperB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1087,7 +1134,7 @@ func TestUnmarshalSliceElemType(t *testing.T) {
 
 	objB = nil
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1105,7 +1152,7 @@ func TestUnmarshalSliceSliceElemType(t *testing.T) {
 ]`)
 
 	var objA []testSliceElemTyperA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1122,7 +1169,7 @@ func TestUnmarshalSliceSliceElemType(t *testing.T) {
 
 	objA = nil
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1131,7 +1178,7 @@ func TestUnmarshalSliceSliceElemType(t *testing.T) {
 	}
 
 	var objB []testSliceElemTyperB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1148,7 +1195,7 @@ func TestUnmarshalSliceSliceElemType(t *testing.T) {
 
 	objB = nil
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1166,7 +1213,7 @@ func TestUnmarshalSlicePointerSliceElemType(t *testing.T) {
 ]`)
 
 	var objA []*testSliceElemTyperA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1183,7 +1230,7 @@ func TestUnmarshalSlicePointerSliceElemType(t *testing.T) {
 
 	objA = nil
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1192,7 +1239,7 @@ func TestUnmarshalSlicePointerSliceElemType(t *testing.T) {
 	}
 
 	var objB []*testSliceElemTyperB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1209,7 +1256,7 @@ func TestUnmarshalSlicePointerSliceElemType(t *testing.T) {
 
 	objB = nil
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1231,7 +1278,7 @@ func TestUnmarshalStructSliceElemType(t *testing.T) {
 	}
 
 	var objA tsA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1248,7 +1295,7 @@ func TestUnmarshalStructSliceElemType(t *testing.T) {
 
 	objA = tsA{}
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1261,7 +1308,7 @@ func TestUnmarshalStructSliceElemType(t *testing.T) {
 	}
 
 	var objB tsB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1278,7 +1325,7 @@ func TestUnmarshalStructSliceElemType(t *testing.T) {
 
 	objB = tsB{}
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1300,7 +1347,7 @@ func TestUnmarshalStructPointerSliceElemType(t *testing.T) {
 	}
 
 	var objA tsA
-	err := Unmarshal(txt, &objA)
+	err := unmarshalInternal(txt, &objA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1317,7 +1364,7 @@ func TestUnmarshalStructPointerSliceElemType(t *testing.T) {
 
 	objA = tsA{}
 	pObjA := &objA
-	err = Unmarshal(txt, &pObjA)
+	err = unmarshalInternal(txt, &pObjA)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1330,7 +1377,7 @@ func TestUnmarshalStructPointerSliceElemType(t *testing.T) {
 	}
 
 	var objB tsB
-	err = Unmarshal(txt, &objB)
+	err = unmarshalInternal(txt, &objB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1347,7 +1394,7 @@ func TestUnmarshalStructPointerSliceElemType(t *testing.T) {
 
 	objB = tsB{}
 	pObjB := &objB
-	err = Unmarshal(txt, &pObjB)
+	err = unmarshalInternal(txt, &pObjB)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1376,7 +1423,7 @@ func TestJSONNumber(t *testing.T) {
 	}
 
 	var n json.Number
-	err = Unmarshal(b, &n)
+	err = unmarshalInternal(b, &n)
 	if err != nil {
 		t.Error(err)
 	}
@@ -1406,7 +1453,7 @@ func TestMapKeys(t *testing.T) {
 
 	{
 		var v map[string]interface{}
-		err := Unmarshal(sampleText, &v)
+		err := unmarshalInternal(sampleText, &v)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -1424,7 +1471,7 @@ func TestMapKeys(t *testing.T) {
 
 	{
 		var v map[int]interface{}
-		err := Unmarshal(sampleText, &v)
+		err := unmarshalInternal(sampleText, &v)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -1442,7 +1489,7 @@ func TestMapKeys(t *testing.T) {
 
 	{
 		var v map[string]string
-		err := Unmarshal(sampleText, &v)
+		err := unmarshalInternal(sampleText, &v)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -1460,7 +1507,7 @@ func TestMapKeys(t *testing.T) {
 
 	{
 		var v map[int]string
-		err := Unmarshal(sampleText, &v)
+		err := unmarshalInternal(sampleText, &v)
 		if err != nil {
 			t.Error(err)
 		} else {
@@ -1497,12 +1544,12 @@ func TestMapTree(t *testing.T) {
 `)
 
 	var v map[int]interface{}
-	err := Unmarshal(textA, &v)
+	err := unmarshalInternal(textA, &v)
 	if err != nil {
 		t.Error(err)
 	}
 
-	err = Unmarshal(textB, &v)
+	err = unmarshalInternal(textB, &v)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1554,12 +1601,12 @@ five: {
 `)
 
 	var v tsA
-	err := Unmarshal(textA, &v)
+	err := unmarshalInternal(textA, &v)
 	if err != nil {
 		t.Error(err)
 	}
 
-	err = Unmarshal(textB, &v)
+	err = unmarshalInternal(textB, &v)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1612,7 +1659,7 @@ i: false
 			itsH: &itsH{},
 		},
 	}
-	err := Unmarshal(textA, &sA)
+	err := unmarshalInternal(textA, &sA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1686,12 +1733,12 @@ five: {
 	sA := itsA{
 		Five: &itsB{},
 	}
-	err := Unmarshal(textA, &sA)
+	err := unmarshalInternal(textA, &sA)
 	if err != nil {
 		t.Error(err)
 	}
 
-	err = Unmarshal(textB, &sA)
+	err = unmarshalInternal(textB, &sA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1725,7 +1772,7 @@ func TestStringInterface(t *testing.T) {
 	var sA itsC
 	var isA InterfaceA
 	isA = &sA
-	err := Unmarshal(textA, &isA)
+	err := unmarshalInternal(textA, &isA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1739,7 +1786,7 @@ func TestStringPointer(t *testing.T) {
 	textA := []byte(`3`)
 
 	var psA *itsC
-	err := Unmarshal(textA, &psA)
+	err := unmarshalInternal(textA, &psA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1767,7 +1814,7 @@ func TestSliceInterface(t *testing.T) {
 	var sA itsD
 	var isA InterfaceA
 	isA = &sA
-	err := Unmarshal(textA, &isA)
+	err := unmarshalInternal(textA, &isA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1804,26 +1851,26 @@ five: {
 `)
 
 	var isA InterfaceA
-	err := Unmarshal(textA, &isA)
+	err := unmarshalInternal(textA, &isA)
 	if err == nil {
 		// If the interface has at least one function it must not be empty.
 		t.Error("Unmarshal into empty InterfaceA did not return error")
 	}
 
 	var isB InterfaceB
-	err = Unmarshal(textA, &isB)
+	err = unmarshalInternal(textA, &isB)
 	if err != nil {
 		t.Error(err)
 	}
 
 	var isC interface{}
-	err = Unmarshal(textA, &isC)
+	err = unmarshalInternal(textA, &isC)
 	if err != nil {
 		t.Error(err)
 	}
 
 	var isD itsA
-	err = Unmarshal(textB, &isD)
+	err = unmarshalInternal(textB, &isD)
 	if err == nil {
 		// If the interface has at least one function it must not be empty.
 		t.Error("Unmarshal into empty InterfaceA did not return error")
@@ -1844,7 +1891,7 @@ two: {
 `)
 
 	var psA *itsE
-	err := Unmarshal(textA, &psA)
+	err := unmarshalInternal(textA, &psA)
 	if err != nil {
 		t.Error(err)
 	} else {
@@ -1873,7 +1920,7 @@ FieLd: 3
 `)
 
 	var sA tsA
-	err := Unmarshal(textA, &sA)
+	err := unmarshalInternal(textA, &sA)
 	if err != nil {
 		t.Error(err)
 	} else if sA.FieLd != "3" {
@@ -1942,7 +1989,7 @@ j: null, k: "another text", l: null
 		B: &itsJ{},
 		C: &itsJ{},
 	}
-	err := Unmarshal(textA, &sA)
+	err := unmarshalInternal(textA, &sA)
 	if err != nil {
 		t.Error(err)
 	} else if !reflect.DeepEqual(sA, tsA{
@@ -1970,7 +2017,7 @@ j: null, k: "another text", l: null
 	textB := []byte(`8`)
 
 	var sL itsL
-	err = Unmarshal(textB, &sL)
+	err = unmarshalInternal(textB, &sL)
 	if err != nil {
 		t.Error(err)
 	} else if sL != itsL(textB[0]) {
@@ -1978,7 +2025,7 @@ j: null, k: "another text", l: null
 	}
 
 	var m map[string]itsL
-	err = Unmarshal(textA, &m)
+	err = unmarshalInternal(textA, &m)
 	if err == nil {
 		t.Error("Should have failed, should not be possible to call pointer method UnmarshalText() on the map elements because they are not addressable.")
 	}
@@ -2026,7 +2073,7 @@ func TestUnmarshalStructWithExtraFields(t *testing.T) {
 }
 `
 	var cfg UnmarshalExtraFieldsConfig
-	err := Unmarshal([]byte(txt), &cfg)
+	err := unmarshalInternal([]byte(txt), &cfg)
 	if err != nil {
 		if strings.Contains(err.Error(), "allow_local is not bool") {
 			t.Fatalf("Bug reproduced: %v", err)
