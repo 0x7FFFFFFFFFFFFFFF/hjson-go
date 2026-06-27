@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -476,6 +477,15 @@ func (p *hjsonParser) readTfnns(dest reflect.Value, t reflect.Type) (interface{}
 			p.ch == '#' ||
 			p.ch == '/' && (p.peek(0) == '/' || p.peek(0) == '*') {
 
+			// Two consecutive commas (",,") turn a quoteless string into an array
+			// (this is handled at end-of-line by splitQuotelessArray). The first of
+			// those commas must not terminate a number/bool/null value, so just
+			// accumulate it here and keep reading.
+			if p.ch == ',' && p.peek(0) == ',' {
+				value.WriteByte(p.ch)
+				continue
+			}
+
 			// Do not output anything else than a string if our destination is a string.
 			// Pointer methods can be called if the destination is addressable,
 			// therefore we also check if dest.Addr() implements encoding.TextUnmarshaler.
@@ -518,12 +528,83 @@ func (p *hjsonParser) readTfnns(dest reflect.Value, t reflect.Type) (interface{}
 			}
 
 			if isEol {
+				raw := value.String()
+				// A quoteless string that contains two consecutive commas is
+				// treated as an array. Such a value may be written across several
+				// lines, so keep reading while the next line is a continuation
+				// rather than a new key or the end of the enclosing object/array.
+				if strings.Contains(raw, ",,") {
+					if p.ch != 0 {
+						if idx, cont := p.quotelessContinues(p.at); cont {
+							value.WriteByte('\n')
+							p.at = idx
+							continue
+						}
+					}
+					return p.splitQuotelessArray(&node, raw)
+				}
 				// remove any whitespace at the end (ignored in quoteless strings)
-				return p.maybeWrapNode(&node, strings.TrimSpace(value.String()))
+				return p.maybeWrapNode(&node, strings.TrimSpace(raw))
 			}
 		}
 		value.WriteByte(p.ch)
 	}
+}
+
+// quotelessArraySep splits a quoteless comma-array value into its elements. It
+// matches the canonical ",," separator (with any surrounding whitespace) and
+// line breaks, since such a value may be written across several lines.
+var quotelessArraySep = regexp.MustCompile(`\s*,,\s*|\r?\n`)
+
+// splitQuotelessArray converts a quoteless string that contains two consecutive
+// commas into an array of strings. The raw value (which may span several lines)
+// is split on quotelessArraySep, every element is trimmed and empty elements
+// (for example the one produced by a trailing ",,") are dropped.
+func (p *hjsonParser) splitQuotelessArray(node *Node, raw string) (interface{}, error) {
+	parts := quotelessArraySep.Split(raw, -1)
+	array := make([]interface{}, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		elem, err := p.maybeWrapNode(&Node{}, part)
+		if err != nil {
+			return nil, err
+		}
+		array = append(array, elem)
+	}
+	return p.maybeWrapNode(node, array)
+}
+
+// quotelessContinues reports whether the text starting at index i (the index
+// just after an end-of-line inside a quoteless comma-array value) continues
+// that value rather than starting a new key, ending the enclosing object or
+// array, or ending the input. When it returns true it also returns the index of
+// the first content character of the continuation line.
+func (p *hjsonParser) quotelessContinues(i int) (int, bool) {
+	n := len(p.data)
+	// Skip the end-of-line characters and any leading inline whitespace to reach
+	// the first content character of the next line.
+	for i < n && (p.data[i] == ' ' || p.data[i] == '\t' ||
+		p.data[i] == '\r' || p.data[i] == '\n') {
+		i++
+	}
+	if i >= n {
+		return i, false
+	}
+	switch p.data[i] {
+	case '{', '}', '[', ']', '"', '\'', '#':
+		return i, false
+	case '/':
+		if i+1 < n && (p.data[i+1] == '/' || p.data[i+1] == '*') {
+			return i, false
+		}
+	}
+	if p.tokenIsKey(i) {
+		return i, false
+	}
+	return i, true
 }
 
 // t must not have been unraveled

@@ -194,6 +194,84 @@ func TestHjson(t *testing.T) {
 	}
 }
 
+func TestQuotelessCommaArray(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  interface{}
+	}{
+		{
+			name:  "single line",
+			input: "text: ab,, cd ef ,, haha  ,, ",
+			want: map[string]interface{}{
+				"text": []interface{}{"ab", "cd ef", "haha"},
+			},
+		},
+		{
+			name:  "trailing double comma only",
+			input: "text: a,,",
+			want: map[string]interface{}{
+				"text": []interface{}{"a"},
+			},
+		},
+		{
+			name:  "numeric elements become strings",
+			input: "ports: 80,, 443,, 8080",
+			want: map[string]interface{}{
+				"ports": []interface{}{"80", "443", "8080"},
+			},
+		},
+		{
+			name:  "multiline continuation",
+			input: "text: ab,, cd\nef ,, gh\n",
+			want: map[string]interface{}{
+				"text": []interface{}{"ab", "cd", "ef", "gh"},
+			},
+		},
+		{
+			name:  "multiline continuation then key",
+			input: "a: ab,, cd\nef\nb: z\n",
+			want: map[string]interface{}{
+				"a": []interface{}{"ab", "cd", "ef"},
+				"b": "z",
+			},
+		},
+		{
+			name:  "stops at next key",
+			input: "a: x,, y\nb: z\n",
+			want: map[string]interface{}{
+				"a": []interface{}{"x", "y"},
+				"b": "z",
+			},
+		},
+		{
+			name:  "single comma stays string",
+			input: "text: a, b, c",
+			want: map[string]interface{}{
+				"text": "a, b, c",
+			},
+		},
+		{
+			name:  "no comma stays string",
+			input: "text: hello world",
+			want: map[string]interface{}{
+				"text": "hello world",
+			},
+		},
+	}
+
+	for _, c := range cases {
+		var got interface{}
+		if err := Unmarshal([]byte(c.input), &got); err != nil {
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s:\n got: %#v\nwant: %#v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestInvalidDestinationType(t *testing.T) {
 	input := []byte(`[1,2,3,4]`)
 	var dat map[string]interface{}
