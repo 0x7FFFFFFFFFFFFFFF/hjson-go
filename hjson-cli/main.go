@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/hjson/hjson-go/v4"
 )
@@ -66,8 +67,59 @@ func main() {
 		os.Exit(0)
 	}
 
-	var err error
+	convert := func(data []byte) ([]byte, error) {
+		var value interface{}
+		var err error
+
+		if *preserveKeyOrder || *preserveComments {
+			var node *hjson.Node
+			opt := hjson.DefaultDecoderOptions()
+			opt.WhitespaceAsComments = false
+			err = hjson.UnmarshalWithOptions(data, &node, opt)
+			value = node
+		} else {
+			err = hjson.Unmarshal(data, &value)
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		var out []byte
+		if *showCompact {
+			if out, err = json.Marshal(value); err != nil {
+				return nil, err
+			}
+			out = fixJSON(out)
+		} else if *showJSON {
+			if out, err = json.MarshalIndent(value, "", *indentBy); err != nil {
+				return nil, err
+			}
+			out = fixJSON(out)
+		} else {
+			opt := hjson.DefaultOptions()
+			opt.IndentBy = *indentBy
+			opt.BracesSameLine = *bracesSameLine
+			opt.EmitRootBraces = !*omitRootBraces
+			opt.QuoteAlways = *quoteAlways
+			opt.Comments = *preserveComments
+			if out, err = hjson.MarshalWithOptions(value, opt); err != nil {
+				return nil, err
+			}
+		}
+		return out, nil
+	}
+
+	// With no input file and an interactive terminal on stdin, run an
+	// interactive REPL where each Ctrl+C parses the buffered input.
+	if flag.NArg() == 0 {
+		if fi, statErr := os.Stdin.Stat(); statErr == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+			runREPL(convert)
+			return
+		}
+	}
+
 	var data []byte
+	var err error
 	if flag.NArg() == 1 {
 		data, err = ioutil.ReadFile(flag.Arg(0))
 	} else {
@@ -77,46 +129,62 @@ func main() {
 		panic(err)
 	}
 
-	var value interface{}
-
-	if *preserveKeyOrder || *preserveComments {
-		var node *hjson.Node
-		opt := hjson.DefaultDecoderOptions()
-		opt.WhitespaceAsComments = false
-		err = hjson.UnmarshalWithOptions(data, &node, opt)
-		value = node
-	} else {
-		err = hjson.Unmarshal(data, &value)
-	}
+	out, err := convert(data)
 	if err != nil {
 		panic(err)
 	}
 
-	var out []byte
-	if *showCompact {
-		out, err = json.Marshal(value)
-		if err != nil {
-			panic(err)
-		}
-		out = fixJSON(out)
-	} else if *showJSON {
-		out, err = json.MarshalIndent(value, "", *indentBy)
-		if err != nil {
-			panic(err)
-		}
-		out = fixJSON(out)
-	} else {
-		opt := hjson.DefaultOptions()
-		opt.IndentBy = *indentBy
-		opt.BracesSameLine = *bracesSameLine
-		opt.EmitRootBraces = !*omitRootBraces
-		opt.QuoteAlways = *quoteAlways
-		opt.Comments = *preserveComments
-		out, err = hjson.MarshalWithOptions(value, opt)
-		if err != nil {
-			panic(err)
+	fmt.Println(string(out))
+}
+
+// runREPL drives an interactive Hjson session. Each time the user presses
+// Ctrl+C the buffered input is parsed and the result is printed, then the REPL
+// waits for the next input. The user can quit by entering "q" or "exit" and
+// pressing Ctrl+C, or by sending EOF (Ctrl+Z on Windows, Ctrl+D on Unix). The
+// platform-specific input handling lives in replReadLoop().
+func runREPL(convert func([]byte) ([]byte, error)) {
+	const prompt = "hjson> "
+
+	defer restoreConsole()
+
+	fmt.Fprintln(os.Stderr, "Interactive Hjson REPL.")
+	fmt.Fprintln(os.Stderr, "  - Type or paste your Hjson (multiple lines allowed).")
+	fmt.Fprintln(os.Stderr, "  - Press Ctrl+C to convert what you have typed so far.")
+	fmt.Fprintln(os.Stderr, "  - To quit: type 'q' (or 'exit') and press Ctrl+C.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprint(os.Stderr, prompt)
+
+	submit := make(chan string)
+	done := make(chan struct{})
+	go replReadLoop(submit, done)
+
+	for {
+		select {
+		case content := <-submit:
+			content = strings.TrimSpace(content)
+			if content == "q" || content == "exit" {
+				fmt.Fprintln(os.Stderr, "\nBye.")
+				return
+			}
+			fmt.Fprintln(os.Stderr)
+			evalAndPrint(content, convert)
+			fmt.Fprint(os.Stderr, prompt)
+		case <-done:
+			fmt.Fprintln(os.Stderr)
+			return
 		}
 	}
+}
 
-	fmt.Println(string(out))
+// evalAndPrint parses content as Hjson and prints the converted result to
+// stdout, or prints any error to stderr. Empty input is ignored.
+func evalAndPrint(content string, convert func([]byte) ([]byte, error)) {
+	if content == "" {
+		return
+	}
+	if out, err := convert([]byte(content)); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+	} else {
+		fmt.Println(string(out))
+	}
 }
